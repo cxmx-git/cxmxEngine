@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Cross-Platform HTML5 Game Engine</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+        }
+        canvas {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas"></canvas>
+    
+    <script>
+        class GameEngine {
+            constructor(canvasId) {
+                this.canvas = document.getElementById(canvasId);
+                this.ctx = this.canvas.getContext('2d');
+                this.gameObjects = [];
+                this.lastTime = 0;
+                this.isRunning = false;
+                
+                // Responsive canvas sizing
+                this.resizeCanvas();
+                window.addEventListener('resize', () => this.resizeCanvas());
+                
+                // Fullscreen setup
+                document.addEventListener('click', () => this.goFullscreen());
+                
+                this.update = this.update.bind(this);
+                this.render = this.render.bind(this);
+                this.gameLoop = this.gameLoop.bind(this);
+            }
+
+            resizeCanvas() {
+                this.canvas.width = window.innerWidth;
+                this.canvas.height = window.innerHeight;
+            }
+
+            goFullscreen() {
+                if (!document.fullscreenElement) {
+                    this.canvas.requestFullscreen().catch(err => {
+                        console.log(`Error attempting to enable fullscreen: ${err}`);
+                    });
+                }
+            }
+
+            start() {
+                this.isRunning = true;
+                this.lastTime = performance.now();
+                requestAnimationFrame(this.gameLoop);
+            }
+
+            stop() {
+                this.isRunning = false;
+            }
+
+            addObject(object) {
+                this.gameObjects.push(object);
+            }
+
+            gameLoop(currentTime) {
+                if (!this.isRunning) return;
+
+                const deltaTime = (currentTime - this.lastTime) / 1000;
+                this.lastTime = currentTime;
+
+                this.update(deltaTime);
+                this.render();
+
+                requestAnimationFrame(this.gameLoop);
+            }
+
+            update(deltaTime) {
+                this.gameObjects.forEach(object => {
+                    if (object.update) object.update(deltaTime);
+                });
+            }
+
+            render() {
+                this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+                this.gameObjects.forEach(object => {
+                    if (object.render) object.render(this.ctx);
+                });
+            }
+        }
+
+        class GameObject {
+            constructor(x, y) {
+                this.x = x;
+                this.y = y;
+            }
+
+            update(deltaTime) {}
+            render(ctx) {}
+        }
+
+        class Player extends GameObject {
+            constructor(x, y) {
+                super(x, y);
+                this.speed = 200;
+                this.width = 30;
+                this.height = 30;
+                this.color = 'blue';
+                
+                // Control states
+                this.moveX = 0;
+                this.moveY = 0;
+                
+                // Keyboard controls
+                this.keys = {};
+                window.addEventListener('keydown', (e) => this.handleKeyboard(e, true));
+                window.addEventListener('keyup', (e) => this.handleKeyboard(e, false));
+                
+                // Gamepad support
+                window.addEventListener('gamepadconnected', (e) => console.log('Gamepad connected:', e.gamepad));
+                
+                // Touch controls
+                this.touchId = null;
+                this.touchStartX = 0;
+                this.touchStartY = 0;
+                window.addEventListener('touchstart', (e) => this.handleTouchStart(e));
+                window.addEventListener('touchmove', (e) => this.handleTouchMove(e));
+                window.addEventListener('touchend', (e) => this.handleTouchEnd(e));
+            }
+
+            handleKeyboard(e, isDown) {
+                const keyMap = {
+                    'ArrowUp': [0, -1],
+                    'ArrowDown': [0, 1],
+                    'ArrowLeft': [-1, 0],
+                    'ArrowRight': [1, 0],
+                    'w': [0, -1],
+                    's': [0, 1],
+                    'a': [-1, 0],
+                    'd': [1, 0]
+                };
+                
+                if (keyMap[e.key]) {
+                    e.preventDefault();
+                    this.moveX = isDown ? keyMap[e.key][0] : 0;
+                    this.moveY = isDown ? keyMap[e.key][1] : 0;
+                }
+            }
+
+            handleTouchStart(e) {
+                if (this.touchId === null) {
+                    const touch = e.changedTouches[0];
+                    this.touchId = touch.identifier;
+                    this.touchStartX = touch.clientX;
+                    this.touchStartY = touch.clientY;
+                }
+            }
+
+            handleTouchMove(e) {
+                for (let touch of e.changedTouches) {
+                    if (touch.identifier === this.touchId) {
+                        const dx = touch.clientX - this.touchStartX;
+                        const dy = touch.clientY - this.touchStartY;
+                        this.moveX = Math.sign(dx);
+                        this.moveY = Math.sign(dy);
+                        e.preventDefault();
+                    }
+                }
+            }
+
+            handleTouchEnd(e) {
+                for (let touch of e.changedTouches) {
+                    if (touch.identifier === this.touchId) {
+                        this.touchId = null;
+                        this.moveX = 0;
+                        this.moveY = 0;
+                    }
+                }
+            }
+
+            updateGamepad() {
+                const gamepads = navigator.getGamepads();
+                for (let gp of gamepads) {
+                    if (gp) {
+                        // Use left stick or D-pad
+                        this.moveX = gp.axes[0] || (gp.buttons[14] ? -1 : gp.buttons[15] ? 1 : 0);
+                        this.moveY = gp.axes[1] || (gp.buttons[12] ? -1 : gp.buttons[13] ? 1 : 0);
+                        
+                        // Normalize diagonal movement
+                        const mag = Math.sqrt(this.moveX * this.moveX + this.moveY * this.moveY);
+                        if (mag > 1) {
+                            this.moveX /= mag;
+                            this.moveY /= mag;
+                        }
+                    }
+                }
+            }
+
+            update(deltaTime) {
+                this.updateGamepad();
+                
+                this.x += this.moveX * this.speed * deltaTime;
+                this.y += this.moveY * this.speed * deltaTime;
+
+                // Dynamic boundary checking based on canvas size
+                this.x = Math.max(0, Math.min(this.x, window.innerWidth - this.width));
+                this.y = Math.max(0, Math.min(this.y, window.innerHeight - this.height));
+            }
+
+            render(ctx) {
+                ctx.fillStyle = this.color;
+                ctx.fillRect(this.x, this.y, this.width, this.height);
+            }
+        }
+
+        // Initialize game
+        const game = new GameEngine('gameCanvas');
+        const player = new Player(window.innerWidth/2, window.innerHeight/2);
+        game.addObject(player);
+        game.start();
+
+        // Instructions
+        console.log('Controls:');
+        console.log('- Keyboard: Arrow keys or WASD');
+        console.log('- Gamepad: Left stick or D-pad');
+        console.log('- Touch: Swipe in direction');
+        console.log('- Click/tap anywhere to enter fullscreen');
+    </script>
+</body>
+</html>

@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Cross-Platform HTML5 Game Engine with GIMP-Inspired Filter</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+        }
+        canvas {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas"></canvas>
+    
+    <script>
+        class GameEngine {
+            constructor(canvasId) {
+                this.canvas = document.getElementById(canvasId);
+                this.ctx = this.canvas.getContext('2d');
+                this.gameObjects = [];
+                this.lastTime = 0;
+                this.isRunning = false;
+                
+                // Background image with load checking
+                this.background = new Image();
+                this.background.crossOrigin = "anonymous";
+                this.background.src = 'assets/background.jpg';
+                this.backgroundLoaded = false;
+                this.background.onload = () => {
+                    this.backgroundLoaded = true;
+                    console.log('Background loaded successfully');
+                };
+                this.background.onerror = () => console.error('Failed to load background.jpg');
+                
+                this.resizeCanvas();
+                window.addEventListener('resize', () => this.resizeCanvas());
+                document.addEventListener('click', () => this.goFullscreen());
+                
+                this.update = this.update.bind(this);
+                this.render = this.render.bind(this);
+                this.gameLoop = this.gameLoop.bind(this);
+            }
+
+            resizeCanvas() {
+                this.canvas.width = window.innerWidth;
+                this.canvas.height = window.innerHeight;
+            }
+
+            goFullscreen() {
+                if (!document.fullscreenElement) {
+                    this.canvas.requestFullscreen().catch(err => {
+                        console.log(`Error attempting to enable fullscreen: ${err}`);
+                    });
+                }
+            }
+
+            start() {
+                this.isRunning = true;
+                this.lastTime = performance.now();
+                requestAnimationFrame(this.gameLoop);
+            }
+
+            stop() {
+                this.isRunning = false;
+            }
+
+            addObject(object) {
+                this.gameObjects.push(object);
+            }
+
+            gameLoop(currentTime) {
+                if (!this.isRunning) return;
+
+                const deltaTime = (currentTime - this.lastTime) / 1000;
+                this.lastTime = currentTime;
+
+                this.update(deltaTime);
+                this.render();
+
+                requestAnimationFrame(this.gameLoop);
+            }
+
+            update(deltaTime) {
+                this.gameObjects.forEach(object => {
+                    if (object.update) object.update(deltaTime);
+                });
+            }
+
+            render() {
+                this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+                if (this.backgroundLoaded) {
+                    this.ctx.drawImage(this.background, 0, 0, this.canvas.width, this.canvas.height);
+                } else {
+                    this.ctx.fillStyle = '#333'; // Fallback background
+                    this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+                }
+                this.gameObjects.forEach(object => {
+                    if (object.render) object.render(this.ctx);
+                });
+            }
+        }
+
+        class GameObject {
+            constructor(x, y) {
+                this.x = x;
+                this.y = y;
+            }
+
+            update(deltaTime) {}
+            render(ctx) {}
+        }
+
+        class Player extends GameObject {
+            constructor(x, y) {
+                super(x, y);
+                this.speed = 200;
+                this.width = 30;
+                this.height = 30;
+                
+                this.sprite = new Image();
+                this.sprite.crossOrigin = "anonymous";
+                this.sprite.src = 'assets/player.png';
+                this.spriteLoaded = false;
+                this.sprite.onload = () => {
+                    this.spriteLoaded = true;
+                    console.log('Player sprite loaded successfully');
+                };
+                this.sprite.onerror = () => console.error('Failed to load player.png');
+                
+                this.moveX = 0;
+                this.moveY = 0;
+                
+                this.filter = {
+                    enabled: true,
+                    r: 0.8, g: 1.0, b: 1.0
+                };
+                
+                this.keys = {};
+                window.addEventListener('keydown', (e) => this.handleKeyboard(e, true));
+                window.addEventListener('keyup', (e) => this.handleKeyboard(e, false));
+                
+                this.touchId = null;
+                this.touchStartX = 0;
+                this.touchStartY = 0;
+                window.addEventListener('touchstart', (e) => this.handleTouchStart(e));
+                window.addEventListener('touchmove', (e) => this.handleTouchMove(e));
+                window.addEventListener('touchend', (e) => this.handleTouchEnd(e));
+            }
+
+            handleKeyboard(e, isDown) {
+                const keyMap = {
+                    'ArrowUp': [0, -1], 'ArrowDown': [0, 1],
+                    'ArrowLeft': [-1, 0], 'ArrowRight': [1, 0],
+                    'w': [0, -1], 's': [0, 1], 'a': [-1, 0], 'd': [1, 0]
+                };
+                if (keyMap[e.key]) {
+                    e.preventDefault();
+                    this.moveX = isDown ? keyMap[e.key][0] : 0;
+                    this.moveY = isDown ? keyMap[e.key][1] : 0;
+                }
+            }
+
+            handleTouchStart(e) {
+                if (this.touchId === null) {
+                    const touch = e.changedTouches[0];
+                    this.touchId = touch.identifier;
+                    this.touchStartX = touch.clientX;
+                    this.touchStartY = touch.clientY;
+                }
+            }
+
+            handleTouchMove(e) {
+                for (let touch of e.changedTouches) {
+                    if (touch.identifier === this.touchId) {
+                        const dx = touch.clientX - this.touchStartX;
+                        const dy = touch.clientY - this.touchStartY;
+                        this.moveX = Math.sign(dx);
+                        this.moveY = Math.sign(dy);
+                        e.preventDefault();
+                    }
+                }
+            }
+
+            handleTouchEnd(e) {
+                for (let touch of e.changedTouches) {
+                    if (touch.identifier === this.touchId) {
+                        this.touchId = null;
+                        this.moveX = 0;
+                        this.moveY = 0;
+                    }
+                }
+            }
+
+            updateGamepad() {
+                const gamepads = navigator.getGamepads();
+                for (let gp of gamepads) {
+                    if (gp) {
+                        this.moveX = gp.axes[0] || (gp.buttons[14] ? -1 : gp.buttons[15] ? 1 : 0);
+                        this.moveY = gp.axes[1] || (gp.buttons[12] ? -1 : gp.buttons[13] ? 1 : 0);
+                        const mag = Math.sqrt(this.moveX * this.moveX + this.moveY * this.moveY);
+                        if (mag > 1) {
+                            this.moveX /= mag;
+                            this.moveY /= mag;
+                        }
+                    }
+                }
+            }
+
+            update(deltaTime) {
+                this.updateGamepad();
+                
+                this.x += this.moveX * this.speed * deltaTime;
+                this.y += this.moveY * this.speed * deltaTime;
+
+                this.x = Math.max(0, Math.min(this.x, window.innerWidth - this.width));
+                this.y = Math.max(0, Math.min(this.y, window.innerHeight - this.height));
+            }
+
+            render(ctx) {
+                if (!this.spriteLoaded) {
+                    // Fallback rendering if sprite fails to load
+                    ctx.fillStyle = 'blue';
+                    ctx.fillRect(this.x, this.y, this.width, this.height);
+                    return;
+                }
+
+                if (this.filter.enabled) {
+                    const offscreen = document.createElement('canvas');
+                    offscreen.width = this.width;
+                    offscreen.height = this.height;
+                    const offCtx = offscreen.getContext('2d');
+                    
+                    offCtx.drawImage(this.sprite, 0, 0, this.width, this.height);
+                    
+                    try {
+                        const imageData = offCtx.getImageData(0, 0, this.width, this.height);
+                        const data = imageData.data;
+                        for (let i = 0; i < data.length; i += 4) {
+                            data[i] *= this.filter.r;
+                            data[i + 1] *= this.filter.g;
+                            data[i + 2] *= this.filter.b;
+                        }
+                        offCtx.putImageData(imageData, 0, 0);
+                        ctx.drawImage(offscreen, this.x, this.y);
+                    } catch (e) {
+                        console.warn('Canvas tainted by cross-origin data. Falling back to unfiltered render.', e);
+                        ctx.drawImage(this.sprite, this.x, this.y, this.width, this.height);
+                    }
+                } else {
+                    ctx.drawImage(this.sprite, this.x, this.y, this.width, this.height);
+                }
+            }
+        }
+
+        const game = new GameEngine('gameCanvas');
+        const player = new Player(window.innerWidth/2, window.innerHeight/2);
+        game.addObject(player);
+        game.start();
+
+        console.log('Controls:');
+        console.log('- Keyboard: Arrow keys or WASD');
+        console.log('- Gamepad: Left stick or D-pad');
+        console.log('- Touch: Swipe in direction');
+        console.log('- Click/tap anywhere to enter fullscreen');
+    </script>
+</body>
+</html>
